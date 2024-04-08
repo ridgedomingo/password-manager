@@ -1,12 +1,16 @@
 package routes
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/ridgedomingo/go-exercises/pkg/generator"
@@ -26,11 +30,21 @@ type PasswordGeneratorParams struct {
 	Url      string `json:"url"`
 }
 
+type UserCredentials struct {
+	Username  string `json:"username"`
+	Url       string `json:"url"`
+	Password  string `json:"password"`
+	Salt      string `json:"salt"`
+	CreatedAt string `json:"created_at"`
+}
+
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /generate-password", generatePassword)
-	mux.HandleFunc("POST /credentials", generateSecuredPassword)
+	mux.HandleFunc("POST /credentials", saveCredentials)
+
+	mux.HandleFunc("GET /credential/{username}", getUserCredentials)
 
 	return mux
 }
@@ -55,7 +69,7 @@ func generatePassword(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(password))
 }
 
-func generateSecuredPassword(w http.ResponseWriter, r *http.Request) {
+func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	body := json.NewDecoder(r.Body)
 	params := new(PasswordGeneratorParams)
 	err := body.Decode(&params)
@@ -126,4 +140,85 @@ func generateSalt(length int) (string, error) {
 	}
 
 	return salt, nil
+}
+
+func getUserCredentials(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+
+	var rows *sql.Rows
+	if username != "" {
+		row, err := database.DBCon.Query("SELECT username, password_hash, url,salt, created_at FROM user_credentials WHERE username = $1", username)
+		if err != nil {
+			log.Fatal("ERROR QUERY", err)
+		}
+		rows = row
+	}
+
+	defer rows.Close()
+
+	var userCredentials []UserCredentials
+	for rows.Next() {
+		var userCredential UserCredentials
+		err := rows.Scan(&userCredential.Username, &userCredential.Password, &userCredential.Url, &userCredential.Salt, &userCredential.CreatedAt)
+		if err != nil {
+			http.Error(w, "Failed to scan row", http.StatusInternalServerError)
+			log.Fatal("Failed to scan row:", err)
+			return
+		}
+		userCredentials = append(userCredentials, userCredential)
+	}
+
+	if err := rows.Err(); err != nil {
+		http.Error(w, "Error during row iteration", http.StatusInternalServerError)
+		log.Fatal("Error during row iteration:", err)
+		return
+	}
+
+	// Create anonmyous struct to remove salt from response
+	var response []interface{}
+	for _, uc := range userCredentials {
+		response = append(response, struct {
+			Username  string `json:"username"`
+			Password  string `json:"password"`
+			Url       string `json:"url"`
+			CreatedAt string `json:"created_at"`
+		}{
+			Username:  uc.Username,
+			Password:  encrypt(uc.Password, uc.Salt), // Encrypt password with salt
+			Url:       uc.Url,
+			CreatedAt: uc.CreatedAt,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func encrypt(plaintext, salt string) string {
+	returnString := ""
+	key, err := os.LookupEnv("AES_KEY")
+	if !err {
+		log.Fatal("Could not get env", err)
+	} else {
+
+		block, err := aes.NewCipher([]byte(key))
+		if err != nil {
+			log.Fatal("Error encrypting", err)
+			returnString = ""
+		}
+
+		plaintextWithSalt := salt + plaintext
+
+		ciphertext := make([]byte, aes.BlockSize+len(plaintextWithSalt))
+		iv := ciphertext[:aes.BlockSize]
+		if _, err := rand.Read(iv); err != nil {
+			log.Fatal("Error reading encryption", err)
+		}
+
+		stream := cipher.NewCFBEncrypter(block, iv)
+		stream.XORKeyStream(ciphertext[aes.BlockSize:], []byte(plaintextWithSalt))
+
+		returnString = base64.URLEncoding.EncodeToString(ciphertext)
+	}
+	return returnString
 }
