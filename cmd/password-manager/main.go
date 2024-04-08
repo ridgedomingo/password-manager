@@ -5,10 +5,12 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/ridgedomingo/password-manager/internal/database"
 	"github.com/ridgedomingo/password-manager/internal/routes"
 )
 
 func main() {
+	database.DBCon, _ = database.CreateConnection()
 	router := routes.NewRouter()
 
 	port := 8081

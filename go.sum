@@ -1,6 +1,4 @@
-github.com/ridgedomingo/go-exercises v0.0.0-20240403080824-03bb3abcb6ba h1:lcHV/g1EmjoVii0GWFM/tUqH2zqj62rjUTiMKE9g05E=
-github.com/ridgedomingo/go-exercises v0.0.0-20240403080824-03bb3abcb6ba/go.mod h1:LyENmGS6uSjFYZ/wzIObeMT0bpuaKR7Fsu+AV5R49g4=
-github.com/ridgedomingo/go-exercises v1.0.0 h1:ybaGcjhuav7+A1gBSJiapCe+vPyIT0WnNHMMpYym9GI=
-github.com/ridgedomingo/go-exercises v1.0.0/go.mod h1:LyENmGS6uSjFYZ/wzIObeMT0bpuaKR7Fsu+AV5R49g4=
+github.com/lib/pq v1.10.9 h1:YXG7RB+JIjhP29X+OtkiDnYaXQwpS4JEWq7dtCCRUEw=
+github.com/lib/pq v1.10.9/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
 github.com/ridgedomingo/go-exercises v1.0.1 h1:aNKfZ3TeIdecQ7M8S9/Yj3Q+k9YC39dANMy+5bo0uKo=
 github.com/ridgedomingo/go-exercises v1.0.1/go.mod h1:LyENmGS6uSjFYZ/wzIObeMT0bpuaKR7Fsu+AV5R49g4=
