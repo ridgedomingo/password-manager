@@ -11,6 +11,7 @@ import (
 
 func main() {
 	database.DBCon, _ = database.CreateConnection()
+	database.DBCon.AutoMigrate(&routes.UserCredentials{})
 	router := routes.NewRouter()
 
 	port := 8081

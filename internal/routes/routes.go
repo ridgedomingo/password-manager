@@ -5,7 +5,8 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"database/sql"
+	"errors"
+
 	"encoding/base64"
 	"encoding/json"
 	"log"
@@ -35,7 +36,7 @@ type UserCredentials struct {
 	Url       string `json:"url"`
 	Password  string `json:"password"`
 	Salt      string `json:"salt"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewRouter() http.Handler {
@@ -104,8 +105,13 @@ func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	hashedPassword := hashPassword(password, salt)
 
 	// Insert user credentials into the database
-	_, err = database.DBCon.Exec("INSERT INTO user_credentials (username, password_hash, url,salt, created_at) VALUES ($1, $2, $3, $4, $5)",
-		params.Username, hashedPassword, params.Url, salt, time.Now())
+	userCredential := UserCredentials {
+		Username: params.Username,
+		Password: hashedPassword,
+		Url: params.Url,
+		Salt: salt,
+	}
+	database.DBCon.Create(&userCredential)
 	if err != nil {
 		http.Error(w, "Failed to insert user credentials into database", http.StatusInternalServerError)
 		log.Fatal("Failed to insert user credentials into database:", err)
@@ -145,46 +151,31 @@ func generateSalt(length int) (string, error) {
 func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 
-	var rows *sql.Rows
+	var userCredentials []UserCredentials 
 	if username != "" {
-		row, err := database.DBCon.Query("SELECT username, password_hash, url,salt, created_at FROM user_credentials WHERE username = $1", username)
+		  err := database.DBCon.Where("username = ?", username).Find(&userCredentials).Error;
 		if err != nil {
 			log.Fatal("ERROR QUERY", err)
 		}
-		rows = row
-	}
-
-	defer rows.Close()
-
-	var userCredentials []UserCredentials
-	for rows.Next() {
-		var userCredential UserCredentials
-		err := rows.Scan(&userCredential.Username, &userCredential.Password, &userCredential.Url, &userCredential.Salt, &userCredential.CreatedAt)
-		if err != nil {
-			http.Error(w, "Failed to scan row", http.StatusInternalServerError)
-			log.Fatal("Failed to scan row:", err)
-			return
-		}
-		userCredentials = append(userCredentials, userCredential)
-	}
-
-	if err := rows.Err(); err != nil {
-		http.Error(w, "Error during row iteration", http.StatusInternalServerError)
-		log.Fatal("Error during row iteration:", err)
-		return
-	}
+    }
 
 	// Create anonmyous struct to remove salt from response
 	var response []interface{}
 	for _, uc := range userCredentials {
+	encryptedPassword, err := encrypt(uc.Password, uc.Salt)
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+	}
 		response = append(response, struct {
 			Username  string `json:"username"`
 			Password  string `json:"password"`
 			Url       string `json:"url"`
-			CreatedAt string `json:"created_at"`
+			CreatedAt time.Time `json:"created_at"`
 		}{
 			Username:  uc.Username,
-			Password:  encrypt(uc.Password, uc.Salt), // Encrypt password with salt
+			Password:  encryptedPassword, // Encrypt password with salt
 			Url:       uc.Url,
 			CreatedAt: uc.CreatedAt,
 		})
@@ -194,17 +185,19 @@ func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func encrypt(plaintext, salt string) string {
+func encrypt(plaintext, salt string) (string, error) {
 	returnString := ""
+	var returnError error
 	key, err := os.LookupEnv("AES_KEY")
 	if !err {
-		log.Fatal("Could not get env", err)
+		log.Print("Could not get env")
+		returnError = errors.New("something went wrong")
 	} else {
 
 		block, err := aes.NewCipher([]byte(key))
 		if err != nil {
-			log.Fatal("Error encrypting", err)
-			returnString = ""
+			log.Print("Error encrypting", err)
+			returnError = errors.New("something went wrong")
 		}
 
 		plaintextWithSalt := salt + plaintext
@@ -212,7 +205,7 @@ func encrypt(plaintext, salt string) string {
 		ciphertext := make([]byte, aes.BlockSize+len(plaintextWithSalt))
 		iv := ciphertext[:aes.BlockSize]
 		if _, err := rand.Read(iv); err != nil {
-			log.Fatal("Error reading encryption", err)
+			returnError = err
 		}
 
 		stream := cipher.NewCFBEncrypter(block, iv)
@@ -220,5 +213,5 @@ func encrypt(plaintext, salt string) string {
 
 		returnString = base64.URLEncoding.EncodeToString(ciphertext)
 	}
-	return returnString
+	return returnString, returnError
 }
