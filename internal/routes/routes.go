@@ -5,14 +5,17 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
-
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	jwt "github.com/dgrijalva/jwt-go"
 
 	"github.com/ridgedomingo/go-exercises/pkg/generator"
 	"github.com/ridgedomingo/password-manager/internal/database"
@@ -24,6 +27,10 @@ type PasswordParams struct {
 	IsNumbersIncluded   bool
 	IsSymbolsIncluded   bool
 	IsUppercaseIncluded bool
+}
+
+type GenerateJWTParams struct {
+	Username string `json:"userName"`
 }
 
 type PasswordGeneratorParams struct {
@@ -39,16 +46,113 @@ type UserCredentials struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type CustomClaims struct {
+	Username string `json:"username"`
+	jwt.StandardClaims
+}
+
+var jwtUsername string
+
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /generate-password", generatePassword)
-	mux.HandleFunc("POST /credentials", saveCredentials)
+	mux.HandleFunc("POST /credentials", authMiddleware(saveCredentials).ServeHTTP)
+	mux.HandleFunc("POST /generate-token", generateToken)
 
-	mux.HandleFunc("GET /credential/{username}", getUserCredentials)
+	mux.HandleFunc("GET /credential/{username}", authMiddleware(getUserCredentials).ServeHTTP)
 
 	return mux
 }
+
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	key:= os.Getenv("SECRET_KEY")
+	secretKey := []byte(key)
+	 	if key == "" {
+        	log.Print("SECRET_KEY environment variable is not set")
+            http.Error(w, "Internal server error", http.StatusInternalServerError)
+    	}
+
+        // Validate the JWT token here
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "Authorization header missing", http.StatusUnauthorized)
+            return
+        }
+
+        parts := strings.Split(authHeader, " ")
+        if len(parts) != 2 || parts[0] != "Bearer" {
+            http.Error(w, "Invalid Authorization header", http.StatusUnauthorized)
+            return
+        }
+
+        tokenString := parts[1]
+
+        // Validate JWT token
+		token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
+            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+                return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+            }
+
+            // Return the secret key for token validation
+            return secretKey, nil
+        })
+        if err != nil {
+            http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+            return
+        }
+
+        // Validate token claims
+        if !token.Valid {
+            http.Error(w, "Invalid token", http.StatusUnauthorized)
+            return
+        }
+
+		claims, ok := token.Claims.(*CustomClaims)
+		if !ok || !token.Valid {
+			fmt.Println("Invalid JWT token")
+			return
+		}
+		jwtUsername = claims.Username
+
+        // Call the next handler if the token is valid
+        next.ServeHTTP(w, r)
+    })
+}
+
+
+func generateToken (w http.ResponseWriter, r *http.Request) {
+	key:= os.Getenv("SECRET_KEY")
+	secretKey := []byte(key)
+
+	 if key == "" {
+        log.Print("SECRET_KEY environment variable is not set")
+        http.Error(w, "Internal server error", http.StatusInternalServerError)
+    } 
+
+	body := json.NewDecoder(r.Body)
+	params := new(GenerateJWTParams)
+	err := body.Decode(&params)
+
+	if err != nil {
+		log.Print(err)
+	}
+	claims := jwt.MapClaims{
+		"username": params.Username,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Token expiry time (1 day)
+	}
+
+	// Create the token
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	signedToken, err := token.SignedString(secretKey)
+	if err != nil {
+		log.Print("Could not generate token", err)
+	}
+	w.Write([]byte(signedToken))
+}
+
 
 func generatePassword(w http.ResponseWriter, r *http.Request) {
 	body := json.NewDecoder(r.Body)
@@ -75,8 +179,14 @@ func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	params := new(PasswordGeneratorParams)
 	err := body.Decode(&params)
 
+	if params.Username != jwtUsername {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if err != nil {
-		log.Fatal("Error while decoding", err)
+		log.Print("Error while decoding json ", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
 
 	// Check if Username is missing in request
@@ -147,9 +257,13 @@ func generateSalt(length int) (string, error) {
 
 	return salt, nil
 }
-
 func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
+	
+	if username != jwtUsername {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	var userCredentials []UserCredentials 
 	if username != "" {
