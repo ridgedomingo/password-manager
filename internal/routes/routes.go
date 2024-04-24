@@ -39,10 +39,10 @@ type PasswordGeneratorParams struct {
 }
 
 type UserCredentials struct {
-	Username  string `json:"username"`
-	Url       string `json:"url"`
-	Password  string `json:"password"`
-	Salt      string `json:"salt"`
+	Username  string    `json:"username"`
+	Url       string    `json:"url"`
+	Password  string    `json:"password"`
+	Salt      string    `json:"salt"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -66,48 +66,48 @@ func NewRouter() http.Handler {
 }
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	key:= os.Getenv("SECRET_KEY")
-	secretKey := []byte(key)
-	 	if key == "" {
-        	log.Print("SECRET_KEY environment variable is not set")
-            http.Error(w, "Internal server error", http.StatusInternalServerError)
-    	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := os.Getenv("SECRET_KEY")
+		secretKey := []byte(key)
+		if key == "" {
+			log.Print("SECRET_KEY environment variable is not set")
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+		}
 
-        // Validate the JWT token here
-        authHeader := r.Header.Get("Authorization")
-        if authHeader == "" {
-            http.Error(w, "Authorization header missing", http.StatusUnauthorized)
-            return
-        }
+		// Validate the JWT token here
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "Authorization header missing", http.StatusUnauthorized)
+			return
+		}
 
-        parts := strings.Split(authHeader, " ")
-        if len(parts) != 2 || parts[0] != "Bearer" {
-            http.Error(w, "Invalid Authorization header", http.StatusUnauthorized)
-            return
-        }
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "Invalid Authorization header", http.StatusUnauthorized)
+			return
+		}
 
-        tokenString := parts[1]
+		tokenString := parts[1]
 
-        // Validate JWT token
+		// Validate JWT token
 		token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (interface{}, error) {
-            if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-                return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-            }
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
 
-            // Return the secret key for token validation
-            return secretKey, nil
-        })
-        if err != nil {
-            http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
-            return
-        }
+			// Return the secret key for token validation
+			return secretKey, nil
+		})
+		if err != nil {
+			http.Error(w, "Invalid token: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
 
-        // Validate token claims
-        if !token.Valid {
-            http.Error(w, "Invalid token", http.StatusUnauthorized)
-            return
-        }
+		// Validate token claims
+		if !token.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
 
 		claims, ok := token.Claims.(*CustomClaims)
 		if !ok || !token.Valid {
@@ -116,20 +116,19 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		}
 		jwtUsername = claims.Username
 
-        // Call the next handler if the token is valid
-        next.ServeHTTP(w, r)
-    })
+		// Call the next handler if the token is valid
+		next.ServeHTTP(w, r)
+	})
 }
 
-
-func generateToken (w http.ResponseWriter, r *http.Request) {
-	key:= os.Getenv("SECRET_KEY")
+func generateToken(w http.ResponseWriter, r *http.Request) {
+	key := os.Getenv("SECRET_KEY")
 	secretKey := []byte(key)
 
-	 if key == "" {
-        log.Print("SECRET_KEY environment variable is not set")
-        http.Error(w, "Internal server error", http.StatusInternalServerError)
-    } 
+	if key == "" {
+		log.Print("SECRET_KEY environment variable is not set")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 
 	body := json.NewDecoder(r.Body)
 	params := new(GenerateJWTParams)
@@ -152,7 +151,6 @@ func generateToken (w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte(signedToken))
 }
-
 
 func generatePassword(w http.ResponseWriter, r *http.Request) {
 	body := json.NewDecoder(r.Body)
@@ -215,11 +213,11 @@ func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	hashedPassword := hashPassword(password, salt)
 
 	// Insert user credentials into the database
-	userCredential := UserCredentials {
+	userCredential := UserCredentials{
 		Username: params.Username,
 		Password: hashedPassword,
-		Url: params.Url,
-		Salt: salt,
+		Url:      params.Url,
+		Salt:     salt,
 	}
 	database.DBCon.Create(&userCredential)
 	if err != nil {
@@ -259,33 +257,33 @@ func generateSalt(length int) (string, error) {
 }
 func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
-	
+
 	if username != jwtUsername {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	var userCredentials []UserCredentials 
+	var userCredentials []UserCredentials
 	if username != "" {
-		  err := database.DBCon.Where("username = ?", username).Find(&userCredentials).Error;
+		err := database.DBCon.Where("username = ?", username).Find(&userCredentials).Error
 		if err != nil {
 			log.Fatal("ERROR QUERY", err)
 		}
-    }
+	}
 
 	// Create anonmyous struct to remove salt from response
 	var response []interface{}
 	for _, uc := range userCredentials {
-	encryptedPassword, err := encrypt(uc.Password, uc.Salt)
+		encryptedPassword, err := encrypt(uc.Password, uc.Salt)
 
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-	}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		response = append(response, struct {
-			Username  string `json:"username"`
-			Password  string `json:"password"`
-			Url       string `json:"url"`
+			Username  string    `json:"username"`
+			Password  string    `json:"password"`
+			Url       string    `json:"url"`
 			CreatedAt time.Time `json:"created_at"`
 		}{
 			Username:  uc.Username,
