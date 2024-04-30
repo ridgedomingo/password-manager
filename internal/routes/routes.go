@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	jwt "github.com/dgrijalva/jwt-go"
@@ -52,6 +53,10 @@ type CustomClaims struct {
 }
 
 var jwtUsername string
+var (
+	cache     = make(map[string]interface{})
+	cacheLock sync.RWMutex
+)
 
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
@@ -119,6 +124,21 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Call the next handler if the token is valid
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Setter for cache
+func setCache(key string, value interface{}) {
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	cache[key] = value
+}
+
+// Getter for cache
+func getCache(key string) (interface{}, bool) {
+	cacheLock.RLock()
+	defer cacheLock.RUnlock()
+	val, ok := cache[key]
+	return val, ok
 }
 
 func generateToken(w http.ResponseWriter, r *http.Request) {
@@ -292,6 +312,15 @@ func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: uc.CreatedAt,
 		})
 	}
+
+	if cachedResponse, ok := getCache(username + "Credentials"); ok {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(cachedResponse)
+		return
+	}
+
+	// Cache the response
+	setCache(username+"_credentials", response)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
