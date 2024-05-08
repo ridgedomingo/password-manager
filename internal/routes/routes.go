@@ -59,13 +59,13 @@ type cacheEntry struct {
 
 var jwtUsername string
 var (
-	// cache     = make(map[string]interface{})
 	cache     = make(map[string]cacheEntry)
 	cacheLock sync.RWMutex
 )
 
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
+	cacheCleanup()
 
 	mux.HandleFunc("POST /generate-password", generatePassword)
 	mux.HandleFunc("POST /credentials", authMiddleware(saveCredentials).ServeHTTP)
@@ -133,6 +133,22 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Call the next handler if the token is valid
 		next.ServeHTTP(w, r)
 	})
+}
+
+func cacheCleanup() {
+	go func() {
+		for {
+			time.Sleep(10 * time.Minute)
+
+			cacheLock.Lock()
+			for key, entry := range cache {
+				if time.Now().After(entry.Expiration) {
+					delete(cache, key)
+				}
+			}
+			cacheLock.Unlock()
+		}
+	}()
 }
 
 // Setter for cache
