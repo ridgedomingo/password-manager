@@ -73,7 +73,8 @@ func NewRouter() http.Handler {
 
 	mux.HandleFunc("GET /credential/{username}", authMiddleware(getUserCredentials).ServeHTTP)
 
-	mux.HandleFunc("DELETE /cache/{username}", authMiddleware(deleteCache).ServeHTTP)
+	mux.HandleFunc("DELETE /cache/{username}", authMiddleware(deleteCacheByUsername).ServeHTTP)
+	mux.HandleFunc("DELETE /cache", authMiddleware(deleteCache).ServeHTTP)
 
 	return mux
 }
@@ -372,7 +373,7 @@ func encrypt(plaintext, salt string) (string, error) {
 	return returnString, returnError
 }
 
-func deleteCache(w http.ResponseWriter, r *http.Request) {
+func deleteCacheByUsername(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 
 	if username != jwtUsername {
@@ -383,6 +384,15 @@ func deleteCache(w http.ResponseWriter, r *http.Request) {
 	delete(cache, username+"_credentials")
 	defer cacheLock.Unlock()
 
-	w.Write([]byte("Cache deleted"))
 	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Cache deleted"))
+}
+
+func deleteCache(w http.ResponseWriter, r *http.Request) {
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+	cache = make(map[string]cacheEntry)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Cache deleted"))
 }
