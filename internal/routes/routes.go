@@ -71,6 +71,8 @@ func NewRouter() http.Handler {
 	mux.HandleFunc("POST /credentials", authMiddleware(saveCredentials).ServeHTTP)
 	mux.HandleFunc("POST /generate-token", generateToken)
 
+	mux.HandleFunc("PUT /extend-cache/{username}", authMiddleware(extendCacheExpiration).ServeHTTP)
+
 	mux.HandleFunc("GET /credential/{username}", authMiddleware(getUserCredentials).ServeHTTP)
 
 	mux.HandleFunc("DELETE /cache/{username}", authMiddleware(deleteCacheByUsername).ServeHTTP)
@@ -411,4 +413,28 @@ func deleteCache(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Cache deleted"))
+}
+
+func extendCacheExpiration(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+
+	if username != jwtUsername {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cacheLock.Lock()
+	defer cacheLock.Unlock()
+
+	entry, ok := cache[username+"_credentials"]
+	if !ok {
+		http.Error(w, "Cache not found", http.StatusInternalServerError)
+		return
+	}
+
+	entry.Expiration = time.Now().Add(30 * time.Minute)
+	cache[username+"_credentials"] = entry
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Cache extended until " + cache[username+"_credentials"].Expiration.Format("Jan 02, 2006 03:04:05 PM")))
+
 }
