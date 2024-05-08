@@ -52,9 +52,15 @@ type CustomClaims struct {
 	jwt.StandardClaims
 }
 
+type cacheEntry struct {
+	Value      interface{}
+	Expiration time.Time
+}
+
 var jwtUsername string
 var (
-	cache     = make(map[string]interface{})
+	// cache     = make(map[string]interface{})
+	cache     = make(map[string]cacheEntry)
 	cacheLock sync.RWMutex
 )
 
@@ -66,6 +72,8 @@ func NewRouter() http.Handler {
 	mux.HandleFunc("POST /generate-token", generateToken)
 
 	mux.HandleFunc("GET /credential/{username}", authMiddleware(getUserCredentials).ServeHTTP)
+
+	mux.HandleFunc("DELETE /cache/{username}", authMiddleware(deleteCache).ServeHTTP)
 
 	return mux
 }
@@ -130,15 +138,22 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 func setCache(key string, value interface{}) {
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
-	cache[key] = value
+	cache[key] = cacheEntry{
+		Value:      value,
+		Expiration: time.Now().Add(3600 * time.Second), // 1 hour expiration,
+	}
 }
 
 // Getter for cache
 func getCache(key string) (interface{}, bool) {
 	cacheLock.RLock()
 	defer cacheLock.RUnlock()
-	val, ok := cache[key]
-	return val, ok
+	cachedData, ok := cache[key]
+	if !ok || time.Now().After(cachedData.Expiration) {
+		// Cache entry not found or expired
+		return nil, false
+	}
+	return cachedData.Value, ok
 }
 
 func generateToken(w http.ResponseWriter, r *http.Request) {
@@ -313,7 +328,7 @@ func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if cachedResponse, ok := getCache(username + "Credentials"); ok {
+	if cachedResponse, ok := getCache(username + "_credentials"); ok {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(cachedResponse)
 		return
@@ -355,4 +370,19 @@ func encrypt(plaintext, salt string) (string, error) {
 		returnString = base64.URLEncoding.EncodeToString(ciphertext)
 	}
 	return returnString, returnError
+}
+
+func deleteCache(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+
+	if username != jwtUsername {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	cacheLock.Lock()
+	delete(cache, username+"_credentials")
+	defer cacheLock.Unlock()
+
+	w.Write([]byte("Cache deleted"))
+	w.WriteHeader(http.StatusOK)
 }
