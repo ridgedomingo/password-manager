@@ -1,3 +1,4 @@
+// This contains the api endpoints in creating user credentials
 package routes
 
 import (
@@ -22,6 +23,7 @@ import (
 	"github.com/ridgedomingo/password-manager/internal/database"
 )
 
+// Parameters to be passed on the password generator package
 type PasswordParams struct {
 	Length              uint
 	PasswordType        string
@@ -30,15 +32,20 @@ type PasswordParams struct {
 	IsUppercaseIncluded bool
 }
 
+// Parameters to be passed for POST /credentials
+//
+// This will generate jwt token that will expire in 1 day.
 type GenerateJWTParams struct {
 	Username string `json:"userName"`
 }
 
+// Request payload used in POST /credentials
 type PasswordGeneratorParams struct {
 	Username string `json:"userName"`
 	Url      string `json:"url"`
 }
 
+// UserCredentials Schema
 type UserCredentials struct {
 	Username  string    `json:"username"`
 	Url       string    `json:"url"`
@@ -47,22 +54,28 @@ type UserCredentials struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// JWT claims
 type CustomClaims struct {
 	Username string `json:"username"`
 	jwt.StandardClaims
 }
 
+// Cache structure
 type cacheEntry struct {
 	Value      interface{}
 	Expiration time.Time
 }
 
+// JWT username value
 var jwtUsername string
+
+// Caching global vars
 var (
 	cache     = make(map[string]cacheEntry)
 	cacheLock sync.RWMutex
 )
 
+// Routes initialization
 func NewRouter() http.Handler {
 	mux := http.NewServeMux()
 	cacheCleanup()
@@ -81,6 +94,7 @@ func NewRouter() http.Handler {
 	return mux
 }
 
+// Interceptor to check if requests have a valid jwt included
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := os.Getenv("SECRET_KEY")
@@ -137,6 +151,7 @@ func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	})
 }
 
+// Goroutine function to check expired cache every 10 minutes
 func cacheCleanup() {
 	go func() {
 		for {
@@ -175,6 +190,7 @@ func getCache(key string) (interface{}, bool) {
 	return cachedData.Value, ok
 }
 
+// Function handler that will generate jwt token
 func generateToken(w http.ResponseWriter, r *http.Request) {
 	key := os.Getenv("SECRET_KEY")
 	secretKey := []byte(key)
@@ -206,6 +222,9 @@ func generateToken(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(signedToken))
 }
 
+// Function that generates random password based on params
+//
+// Uses github.com/ridgedomingo/go-exercises/pkg/generator package
 func generatePassword(w http.ResponseWriter, r *http.Request) {
 	body := json.NewDecoder(r.Body)
 	params := new(PasswordParams)
@@ -226,6 +245,7 @@ func generatePassword(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(password))
 }
 
+// Function handler that saves user credentials in database
 func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	body := json.NewDecoder(r.Body)
 	params := new(PasswordGeneratorParams)
@@ -283,12 +303,14 @@ func saveCredentials(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Credentials successfully saved"))
 }
 
+// Function to hash password
 func hashPassword(password, salt string) string {
 	hasher := sha256.New()
 	hasher.Write([]byte(password + salt))
 	return base64.URLEncoding.EncodeToString(hasher.Sum(nil))
 }
 
+// Function that will generate salt based on length provided
 func generateSalt(length int) (string, error) {
 	// Calculate the number of bytes needed for the salt
 	numBytes := length * 3 / 4 // Base64 encoding expands 3 bytes to 4 characters
@@ -309,6 +331,10 @@ func generateSalt(length int) (string, error) {
 
 	return salt, nil
 }
+
+// Function handler for GET /credential/{username}
+//
+// This will retrieve the user's saved credentials by providing the username
 func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 
@@ -360,6 +386,7 @@ func getUserCredentials(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// Function to encrpyt text
 func encrypt(plaintext, salt string) (string, error) {
 	returnString := ""
 	var returnError error
@@ -391,6 +418,9 @@ func encrypt(plaintext, salt string) (string, error) {
 	return returnString, returnError
 }
 
+// Function handler for DELETE /cache/{username}
+//
+// Deletes all saved cache by the passed username
 func deleteCacheByUsername(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 
@@ -406,6 +436,9 @@ func deleteCacheByUsername(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Cache deleted"))
 }
 
+// Function handler for DELETE /cache
+//
+// Deletes all saved cache
 func deleteCache(w http.ResponseWriter, r *http.Request) {
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
@@ -415,6 +448,9 @@ func deleteCache(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Cache deleted"))
 }
 
+// Function handler for PUT /extend-cache/{username}
+//
+// Extends the saved cache of a user by 30 mins
 func extendCacheExpiration(w http.ResponseWriter, r *http.Request) {
 	username := r.PathValue("username")
 
